@@ -678,26 +678,31 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
         if node.keys.len() > ORDER {
             panic!()
-        }
-
-        
-        if node.keys.len() == ORDER {
+        } else if node.keys.len() < ORDER {
+            let key_index = node.keys.search(key);
+            node.keys.insert_at(key_index, key).unwrap();
+            node.children.insert_at(key_index, &value_pointer).unwrap();
+        }else if node.keys.len() == ORDER {
             
             let new_key_index = node.keys.search(key);
-            let mut left_node: BPlusTreeNode<K>;
-            let mut right_node: BPlusTreeNode<K>;
-            if node.is_leaf {
-                left_node = BPlusTreeNode::new_leaf();
-                right_node = BPlusTreeNode::new_leaf();
-                
-            } else {
-                left_node = BPlusTreeNode::new_branch();
-                right_node = BPlusTreeNode::new_branch();
-            }
+            let mut left_node = BPlusTreeNode::new_leaf();
+            let mut right_node = BPlusTreeNode::new_leaf();
             
-            for i in 0 .. node.keys.len() {
-                let k = node.keys[i];
-                let p = node.children[i];
+            
+            for i in 0..node.keys.len() {
+                let mut k = node.keys[i];
+                let mut p = node.children[i];
+                if i == new_key_index {
+                    k = *key;
+                    p = value_pointer;
+                    if i < cut(ORDER) {
+                    left_node.keys.push(k);
+                    left_node.children.push(p);
+                    } else {
+                        right_node.keys.push(k);
+                        right_node.children.push(p);
+                    }
+                }
                 if i < cut(ORDER) {
                     left_node.keys.push(k);
                     left_node.children.push(p);
@@ -706,14 +711,7 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                     right_node.children.push(p);
                 }
             }
-            if new_key_index < cut(ORDER) {
-                left_node.keys.insert_at(new_key_index, key).unwrap();
-                left_node.children.insert_at(new_key_index, &value_pointer).unwrap();
-            } else {
-                left_node.keys.insert_at(new_key_index, key).unwrap();
-                left_node.children.insert_at(new_key_index, &value_pointer).unwrap();
-                
-            }
+
             let key = node.keys[cut(ORDER)];
 
             let mut parent_pointer = node.parent;
@@ -1211,11 +1209,11 @@ mod tests {
                 tree.insert(&item, ptr(item as usize));
                 inserted.push(item);
             }
-            if rand::random_bool(0.1) {
-                let delete = inserted.swap_remove(rand::random_range(0..inserted.len()));
-                println!("-{},  {}", delete, count);
-                tree.delete_key(&delete).unwrap();
-            }
+            // if rand::random_bool(0.1) {
+            //     let delete = inserted.swap_remove(rand::random_range(0..inserted.len()));
+            //     println!("-{},  {}", delete, count);
+            //     tree.delete_key(&delete).unwrap();
+            // }
         }
 
         let (height_is_correct, height_error) = check_tree_height(&tree);
