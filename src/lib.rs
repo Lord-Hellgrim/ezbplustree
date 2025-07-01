@@ -538,6 +538,7 @@ pub fn pop_from_hashset<T: Eq + Hash + Clone>(set: &mut FnvHashSet<T>) -> Option
 ///ORDER MUST BE AN EVEN NUMBER
 pub const ORDER: usize = 6;
 pub const ORDER_PLUS_ONE: usize = ORDER + 1;
+pub const ORDER_PLUS_TWO: usize = ORDER + 2;
 
 
 #[derive(Clone, PartialEq, Debug)]
@@ -677,6 +678,8 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
         // println!("node: {}\n{}", node_pointer, node);
 
         if node.keys.len() > ORDER {
+            println!("{}", self);
+            println!("Node :'{}' somehow has more than ORDER keys", target_node_pointer);
             panic!()
         } else if node.keys.len() < ORDER {
             let key_index = node.keys.search(key);
@@ -696,8 +699,8 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                     k = *key;
                     p = value_pointer;
                     if i < cut(ORDER) {
-                    left_node.keys.push(k);
-                    left_node.children.push(p);
+                        left_node.keys.push(k);
+                        left_node.children.push(p);
                     } else {
                         right_node.keys.push(k);
                         right_node.children.push(p);
@@ -743,38 +746,45 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                 left_node.set_right_sibling_pointer(right_pointer);
                 self.nodes[target_node_pointer] = left_node;
                 
-                // let left_pointer = target_node_pointer;
-
-                // let left_node = &mut self.nodes[left_pointer];
-                
-                // self.update_keys(parent_pointer, left_pointer, &lower_key, &upper_key);
                 self.insert_into_branch(&key, right_pointer, parent_pointer);
             }
-            // drop(node);
         }
     }
 
-    fn insert_into_branch(&mut self, key: &K, value_pointer: Pointer, target_node_pointer: Pointer) {
+    fn insert_into_branch(&mut self, key: &K, child_pointer: Pointer, target_node_pointer: Pointer) {
         let node = &mut self.nodes[target_node_pointer];
 
         if node.keys.len() > ORDER {
             panic!()
-        }
+        } else if node.keys.len() < ORDER {
 
-        let index = node.keys.search(key);
-        node.keys.insert_at(index, key).unwrap();
-        
-        node.children.insert_at(index+1, &value_pointer).unwrap();
-
-        if node.keys.len() == ORDER {
+            let index = node.keys.search(key);
+            node.keys.insert_at(index, key).unwrap();
             
+            node.children.insert_at(index+1, &child_pointer).unwrap();
+        } else if node.keys.len() == ORDER {
+            
+            let new_key_index = node.keys.search(key);
             let mut left_node = BPlusTreeNode::new_branch();
             let mut right_node = BPlusTreeNode::new_branch();
 
+            let mut temp_keys:     FixedList<K,       ORDER_PLUS_ONE> = FixedList::new();
+            let mut temp_children: FixedList<Pointer, ORDER_PLUS_TWO> = FixedList::new();
+
+            for key in node.keys.iter() {
+                temp_keys.push(*key);
+            }
+            for child in node.children.iter() {
+                temp_children.push(*child);
+            }
+
+            temp_keys.insert_at(new_key_index, key).unwrap();
+            temp_children.insert_at(new_key_index, &child_pointer).unwrap();
+
             let mut i = 0;
-            while i < node.keys.len() {
-                let k = node.keys[i];
-                let p = node.children[i];
+            while i < temp_keys.len() {
+                let k = temp_keys[i];
+                let p = temp_children[i];
                 if i < ORDER / 2 {
                     left_node.keys.push(k);
                     left_node.children.push(p);
@@ -787,10 +797,10 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
                 i += 1;
             }
-            let p = node.children[i];
+            let p = temp_children[i];
             right_node.children.push(p);
 
-            let key = node.keys[cut(ORDER)];
+            let key = temp_keys[cut(ORDER)];
 
             let mut parent_pointer = node.parent;
             if parent_pointer == NULLPTR {
