@@ -364,8 +364,8 @@ impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized, const N: usize> FixedLis
         if self.len == 0 {
             None
         } else {
-            let result = self.list[self.len].clone();
-            self.list[self.len] = T::null();
+            let result = self.list[self.len-1].clone();
+            self.list[self.len-1] = T::null();
             self.len -= 1;
             Some(result)
         }
@@ -375,7 +375,7 @@ impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized, const N: usize> FixedLis
         self.len == N
     }
 
-    pub fn insert_at(&mut self, index: usize, value: &T) -> Result<(), String> {
+    pub fn inject_at(&mut self, index: usize, value: &T) -> Result<(), String> {
         if self.full() || index > self.len {
             self.push(*value);
             return Err(format!("Tried to insert {:?} at index {} in a FixedList of len {}", value, index, self.len) )
@@ -386,7 +386,7 @@ impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized, const N: usize> FixedLis
         self.list[index] = value.clone();
         self.len += 1;
         for i in 0..temp.len()-1 {
-            self.list[index+1+i] = temp[i].clone();
+            self.list[index+1+i] = temp[i];
         }
 
         Ok(())
@@ -424,7 +424,7 @@ impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized, const N: usize> FixedLis
     pub fn search(&self, t: &T) -> usize {
         let mut i = 0;
         while i < self.len() {
-            if &self.list[i] > t  {
+            if &self.list[i] >= t  {
                 break
             }
             i += 1;
@@ -542,20 +542,20 @@ pub const ORDER_PLUS_TWO: usize = ORDER + 2;
 
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct BPlusTreeNode<T: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> {
-    keys: FixedList<T, ORDER>,
+pub struct BPlusTreeNode<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> {
+    keys: FixedList<K, ORDER>,
     parent: Pointer,
     children: FixedList<Pointer, ORDER_PLUS_ONE>,
     is_leaf: bool,
 }
 
-impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> Null for BPlusTreeNode<T> {
+impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> Null for BPlusTreeNode<K> {
     fn null() -> Self {
         BPlusTreeNode::new_branch()
     }
 }
 
-impl<T: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized> Display for BPlusTreeNode<T> {
+impl<K: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized> Display for BPlusTreeNode<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.is_leaf {
             writeln!(f, "LEAF:\nparent: {}\nis_leaf: {}\nkeys: {}\nchildren: {}\nRight_sibling: {}", self.parent, self.is_leaf, self.keys, self.children, self.get_right_sibling_pointer())
@@ -567,13 +567,13 @@ impl<T: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized> Display for BP
 }
 
 
-impl <T: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display + Display> BPlusTreeNode<T> {
+impl <K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display + Display> BPlusTreeNode<K> {
 
-    pub fn new_branch() -> BPlusTreeNode<T> {
+    pub fn new_branch() -> BPlusTreeNode<K> {
         BPlusTreeNode { keys: FixedList::new(), parent: NULLPTR, children: FixedList::new(), is_leaf: false }
     }
 
-    pub fn new_leaf() -> BPlusTreeNode<T> {
+    pub fn new_leaf() -> BPlusTreeNode<K> {
         BPlusTreeNode { keys: FixedList::new(), parent: NULLPTR, children: FixedList::new(), is_leaf: true }
     }
 
@@ -588,6 +588,58 @@ impl <T: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display + Display> BPl
 
     fn set_right_sibling_pointer(&mut self, pointer: Pointer) {
         self.children.set_end_slot(pointer);
+    }
+
+    fn split(&self, key: K, value: Pointer) -> (BPlusTreeNode<K>, BPlusTreeNode<K>, K) {
+        let mut temp_keys:     FixedList<K,       ORDER_PLUS_ONE> = FixedList::new();
+        let mut temp_children: FixedList<Pointer, ORDER_PLUS_TWO> = FixedList::new();
+        
+        for key in self.keys.iter() {
+            temp_keys.push(*key);
+        }
+        for child in self.children.iter() {
+            temp_children.push(*child);
+        }
+        
+        let key_index = temp_keys.search(&key);
+        
+        if self.is_leaf {
+            temp_keys.inject_at(key_index, &key).unwrap();
+            temp_children.inject_at(key_index, &value).unwrap();
+            let mut left_node: BPlusTreeNode<K> = BPlusTreeNode::new_leaf();
+            let mut right_node: BPlusTreeNode<K> = BPlusTreeNode::new_leaf();
+            for i in 0..ORDER/2 {
+                left_node.keys.push(temp_keys[i]);
+                left_node.children.push(temp_children[i]);
+            }
+            for i in ORDER/2..temp_keys.len() {
+                right_node.keys.push(temp_keys[i]);
+                right_node.children.push(temp_children[i]);
+            }
+            let old_sibling = self.get_right_sibling_pointer();
+            right_node.set_right_sibling_pointer(old_sibling);
+            let bump_key = right_node.keys[0];
+            return (left_node, right_node, bump_key)
+        } else {
+            temp_keys.inject_at(key_index, &key).unwrap();
+            temp_children.inject_at(key_index+1, &value).unwrap();
+            let mut left_node: BPlusTreeNode<K> = BPlusTreeNode::new_branch();
+            let mut right_node: BPlusTreeNode<K> = BPlusTreeNode::new_branch();
+            for i in 0..ORDER/2 {
+                left_node.keys.push(temp_keys[i]);
+                left_node.children.push(temp_children[i]);
+            }
+            left_node.children.push(temp_children[ORDER/2]);
+
+            for i in (ORDER/2)+1 .. temp_keys.len() {
+                right_node.keys.push(temp_keys[i]);
+            }
+            for i in (ORDER/2)+1 .. temp_children.len() {
+                right_node.children.push(temp_children[i]);
+            }
+            let bump_key = temp_keys[ORDER/2];
+            return (left_node, right_node, bump_key)
+        }
     }
 
 }
@@ -671,6 +723,68 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
         self.insert_into_leaf(key, value, node_pointer);
     }
 
+    fn alt_insert(&mut self, key: K, value: Pointer) {
+        let mut parent_stack: FixedList<Pointer, 40>  = FixedList::new();
+        parent_stack.push(NULLPTR);
+        let mut node_pointer = self.root_node;
+        let mut node = &self.nodes[node_pointer];
+        while !node.is_leaf {
+            parent_stack.push(node_pointer);
+            let key_index = node.keys.search(&key);
+            if node_pointer == node.children[key_index] {
+                println!("{}", self);
+                println!("self-referencing pointer: {}", node_pointer);
+                panic!()
+            }
+            node_pointer = node.children[key_index];
+            node = &self.nodes[node_pointer];
+        }
+
+        let leaf_node = &mut self.nodes[node_pointer];
+
+        assert!(leaf_node.keys.len() <= ORDER);
+        if leaf_node.keys.len() < ORDER {
+            let key_index = leaf_node.keys.search(&key);
+            leaf_node.keys.inject_at(key_index, &key).unwrap();
+            leaf_node.children.inject_at(key_index, &value).unwrap();
+        } else {
+            let (mut left_node, right_node, mut bump_key) = leaf_node.split(key, value);
+
+            let mut right_node_pointer = self.nodes.add(right_node);
+            left_node.set_right_sibling_pointer(right_node_pointer);
+
+            self.nodes[node_pointer] = left_node;
+
+            for _ in 0..40 {
+                let parent_pointer = parent_stack.pop().unwrap();
+                if parent_pointer.is_null() {
+                    let mut new_root_node = BPlusTreeNode::new_branch();
+                    new_root_node.keys.push(bump_key);
+                    new_root_node.children.push(node_pointer);
+                    new_root_node.children.push(right_node_pointer);
+                    let new_root_pointer = self.nodes.add(new_root_node);
+                    self.root_node = new_root_pointer;
+                    break
+                } else {
+                    let parent_node = &self.nodes[parent_pointer];
+                    let key_index = parent_node.keys.search(&bump_key);
+                    if parent_node.keys.len() < ORDER {
+                        let parent_node = &mut self.nodes[parent_pointer];
+                        parent_node.keys.inject_at(key_index, &bump_key).unwrap();
+                        parent_node.children.inject_at(key_index+1, &right_node_pointer).unwrap();
+                        break
+                    } else {
+                        let (left_node, right_node, new_bump_key) = parent_node.split(bump_key, right_node_pointer);
+                        right_node_pointer = self.nodes.add(right_node);
+                        self.nodes[node_pointer] = left_node;
+                        bump_key = new_bump_key;
+                    }
+                }
+            }
+
+        }
+    }
+
     fn insert_into_leaf(&mut self, key: &K, value_pointer: Pointer, target_node_pointer: Pointer) {
 
         let node = &mut self.nodes[target_node_pointer];
@@ -682,10 +796,14 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
             panic!()
         } else if node.keys.len() < ORDER {
             let key_index = node.keys.search(key);
-            node.keys.insert_at(key_index, key).unwrap();
-            node.children.insert_at(key_index, &value_pointer).unwrap();
+            if node.keys[key_index] == *key {
+                node.children[key_index] = value_pointer;
+                return
+            } else {
+                node.keys.inject_at(key_index, key).unwrap();
+                node.children.inject_at(key_index, &value_pointer).unwrap();
+            }
         }else if node.keys.len() == ORDER {
-            
             
             let mut temp_keys:     FixedList<K,       ORDER_PLUS_ONE> = FixedList::new();
             let mut temp_children: FixedList<Pointer, ORDER_PLUS_ONE> = FixedList::new();
@@ -698,8 +816,8 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
             }
             
             let new_key_index = temp_keys.search(key);
-            temp_keys.insert_at(new_key_index, key).unwrap();
-            temp_children.insert_at(new_key_index, &value_pointer).unwrap();
+            temp_keys.inject_at(new_key_index, key).unwrap();
+            temp_children.inject_at(new_key_index, &value_pointer).unwrap();
 
             let mut left_node = BPlusTreeNode::new_leaf();
             let mut right_node = BPlusTreeNode::new_leaf();
@@ -718,7 +836,6 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
                 i += 1;
             }
-
 
             let key = right_node.keys[0];
 
@@ -747,7 +864,6 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                 right_node.parent = parent_pointer;
                 
                 let right_pointer = self.nodes.add(right_node);
-                left_node.set_right_sibling_pointer(right_pointer);
                 self.nodes[target_node_pointer] = left_node;
                 
                 self.insert_into_branch(parent_pointer, key, right_pointer);
@@ -764,8 +880,8 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
         } else if node.keys.len() < ORDER {
             let node = &mut self.nodes[branch_node_pointer];
             let key_index = node.keys.search(&key);
-            node.keys.insert_at(key_index, &key).unwrap();
-            node.children.insert_at(key_index + 1, &child_pointer).unwrap();
+            node.keys.inject_at(key_index, &key).unwrap();
+            node.children.inject_at(key_index + 1, &child_pointer).unwrap();
         } else if node.keys.len() == ORDER {
             let mut temp_keys: FixedList<K,           ORDER_PLUS_ONE> = FixedList::new();
             let mut temp_children: FixedList<Pointer, ORDER_PLUS_TWO> = FixedList::new();
@@ -777,28 +893,25 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                 temp_children.push(node.children[i]);
             }
             let key_index = temp_keys.search(&key);
-            temp_keys.insert_at(key_index, &key).unwrap();
-            temp_children.insert_at(key_index + 1, &child_pointer).unwrap();
+            temp_keys.inject_at(key_index, &key).unwrap();
+            temp_children.inject_at(key_index+1, &child_pointer).unwrap();
 
             let mut left_node: BPlusTreeNode<K> = BPlusTreeNode::new_branch();
             let mut right_node: BPlusTreeNode<K> = BPlusTreeNode::new_branch();
-            for i in 0..temp_keys.len() {
-                if i < ORDER / 2 {
+            for i in 0..ORDER/2 {
                     left_node.keys.push(temp_keys[i]);
-                } else if i > ORDER / 2 {
-                    right_node.keys.push(temp_keys[i]);
-                }
             }
-            let bump_key = right_node.keys[0];
-            for i in 0..temp_children.len() {
-                if i < ORDER / 2 {
-                    left_node.children.push(temp_children[i]);
-                } else if i == ORDER / 2 {
-                    left_node.children.push(temp_children[i]);
-                } else if i > ORDER / 2 {
-                    right_node.children.push(temp_children[i]);
-                }
+            for i in (ORDER/2)+1 .. temp_keys.len() {
+                right_node.keys.push(temp_keys[i]);
             }
+                
+            let bump_key = temp_keys[ORDER/2];
+            for i in 0..ORDER/2 + 1 {
+                    left_node.children.push(temp_children[i]);
+            }
+            for i in ORDER/2 + 1 .. temp_children.len() {
+                right_node.children.push(temp_children[i]);
+            } 
             
 
             let node_parent_pointer = node.parent;
@@ -1177,7 +1290,7 @@ pub fn check_tree_leafpairs(tree: &BPlusTreeMap<u32>) -> (bool, String) {
 
 }
 
-pub fn check_tree_mapping(tree: &BPlusTreeMap<u32>, expected_keys: Vec<u32>) -> (bool, Vec<u32>) {
+pub fn check_tree_mapping(tree: &BPlusTreeMap<u32>, expected_keys: Vec<u32>) -> (bool, Vec<(u32, Pointer)>) {
     let mut record = Vec::new();
 
     let mut success = true;
@@ -1185,7 +1298,18 @@ pub fn check_tree_mapping(tree: &BPlusTreeMap<u32>, expected_keys: Vec<u32>) -> 
     for key in expected_keys {
         let p = tree.get_value(&key);
         if p.is_null() {
-            record.push(key);
+            let mut real_location = NULLPTR;
+            for (index, node) in tree.nodes.into_iter().enumerate() {
+                match node.keys.find(&key) {
+                    Some(_) => {
+                        real_location = ptr(index);
+                        break;
+                    },
+                    None => continue,
+                }
+            }
+            
+            record.push((key, real_location));
             success = false;
         }
     }
@@ -1228,7 +1352,7 @@ mod tests {
             } else {
                 let item = item.unwrap();
                 // println!("{},", item);
-                tree.insert(&item, ptr(item as usize));
+                tree.alt_insert(item, ptr(item as usize));
                 inserted.push(item);
             }
             // if rand::random_bool(0.1) {
