@@ -799,9 +799,6 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
     }
 
-    fn get_left_pointer(&self, node_pointer: Pointer, parent_stack: ParentStack) -> Pointer {
-        NULLPTR
-    }
 
 }
 
@@ -840,8 +837,10 @@ pub fn check_tree_ordering<K: Null + Clone + Copy + Debug + Display + Ord + Eq +
     }
 
     let mut last_key = node.keys[0];
+    let mut leaf_count = 0;
     while !node_pointer.is_null() {
         node = &tree.nodes[node_pointer];
+        leaf_count += 1;
         for key in node.keys.iter() {
             if &last_key > key {
                 return (false, format!("Found out of order key in node: {}. Key '{}' is larger than key: '{}'", node_pointer, last_key, key))
@@ -850,6 +849,18 @@ pub fn check_tree_ordering<K: Null + Clone + Copy + Debug + Display + Ord + Eq +
             }
         }
         node_pointer = node.get_right_sibling_pointer();
+    }
+
+    let mut leaf_count_straight = 0;
+    for node in tree.nodes.into_iter() {
+        if node.is_leaf {
+            leaf_count_straight += 1;
+        }
+    }
+
+    if leaf_count != leaf_count_straight {
+        return (false, format!("Only {} out of {} nodes accessible via sibling pointers", leaf_count, leaf_count_straight))
+
     }
 
     (true, "ALL GOOD".to_owned())
@@ -1007,18 +1018,5 @@ mod tests {
         }
 
     }
-
-    #[test]
-    fn test_fixed_list() {
-        let mut test_list: FixedList<_, 4> = FixedList::new();
-
-        test_list.push(0);
-        test_list.push(2);
-        test_list.push(3);
-        let i = test_list.search(&4);
-        dbg!(test_list);
-        println!("i: {}", i);
-    }
-
 
 }
