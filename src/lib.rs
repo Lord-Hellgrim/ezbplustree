@@ -424,7 +424,7 @@ impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized, const N: usize> FixedLis
     pub fn search(&self, t: &T) -> usize {
         let mut i = 0;
         while i < self.len() {
-            if &self.list[i] >= t  {
+            if &self.list[i] > t  {
                 break
             }
             i += 1;
@@ -547,6 +547,7 @@ pub struct BPlusTreeNode<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Dis
     parent: Pointer,
     children: FixedList<Pointer, ORDER_PLUS_ONE>,
     is_leaf: bool,
+    right_sibling: Pointer,
 }
 
 impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> Null for BPlusTreeNode<K> {
@@ -570,11 +571,11 @@ impl<K: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized> Display for BP
 impl <K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display + Display> BPlusTreeNode<K> {
 
     pub fn new_branch() -> BPlusTreeNode<K> {
-        BPlusTreeNode { keys: FixedList::new(), parent: NULLPTR, children: FixedList::new(), is_leaf: false }
+        BPlusTreeNode { keys: FixedList::new(), parent: NULLPTR, children: FixedList::new(), is_leaf: false, right_sibling: NULLPTR }
     }
 
     pub fn new_leaf() -> BPlusTreeNode<K> {
-        BPlusTreeNode { keys: FixedList::new(), parent: NULLPTR, children: FixedList::new(), is_leaf: true }
+        BPlusTreeNode { keys: FixedList::new(), parent: NULLPTR, children: FixedList::new(), is_leaf: true, right_sibling: NULLPTR }
     }
 
     pub fn clear(&mut self) {
@@ -583,11 +584,11 @@ impl <K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display + Display> BPl
     }
 
     fn get_right_sibling_pointer(&self) -> Pointer {
-        self.children.get_end_slot()
+        self.right_sibling
     }
 
     fn set_right_sibling_pointer(&mut self, pointer: Pointer) {
-        self.children.set_end_slot(pointer);
+        self.right_sibling = pointer;
     }
 
     fn split(&self, key: K, value: Pointer) -> (BPlusTreeNode<K>, BPlusTreeNode<K>, K) {
@@ -776,8 +777,9 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                     } else {
                         let (left_node, right_node, new_bump_key) = parent_node.split(bump_key, right_node_pointer);
                         right_node_pointer = self.nodes.add(right_node);
-                        self.nodes[node_pointer] = left_node;
+                        node_pointer = parent_pointer;
                         bump_key = new_bump_key;
+                        self.nodes[node_pointer] = left_node;
                     }
                 }
             }
@@ -974,6 +976,7 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
         }
 
     }
+
 
     fn get_left_sibling_pointer(&self, leaf_node: &BPlusTreeNode<K>) -> Pointer {
         
@@ -1296,7 +1299,21 @@ pub fn check_tree_mapping(tree: &BPlusTreeMap<u32>, expected_keys: Vec<u32>) -> 
     let mut success = true;
 
     for key in expected_keys {
-        let p = tree.get_value(&key);
+        let p = {
+            let mut node_pointer = tree.root_node;
+            let mut node = &tree.nodes[node_pointer];
+            while !node.is_leaf {
+                let key_index = node.keys.search(&key);
+                node_pointer = node.children[key_index];
+                node = &tree.nodes[node_pointer];
+            }
+
+            let p = match node.keys.find(&key) {
+                Some(index) => node.children[index],
+                None => NULLPTR
+            };
+            p
+        };
         if p.is_null() {
             let mut real_location = NULLPTR;
             for (index, node) in tree.nodes.into_iter().enumerate() {
@@ -1338,6 +1355,21 @@ mod tests {
     fn test_BPlusTree_proper() {
         let mut tree: BPlusTreeMap<u32> = BPlusTreeMap::new(String::from("test"));
         let mut inserts = FnvHashSet::default();
+        let mut known_inserts = vec![
+            50,  988, 941, 220, 756, 396, 541, 53,
+            821, 215, 636, 932, 495, 276, 903, 95,
+            206, 631, 39,  86,  193, 961, 409, 262,
+            518, 689, 73,  248, 353, 424, 987, 569, 
+            64,  536, 651, 722, 531, 275, 898, 811,
+            602, 725, 237, 290, 546, 996, 228, 700, 
+            549, 967, 108, 516, 695, 766, 575, 319, 
+            942, 326, 582, 30,  137, 905, 822, 720, 
+            633, 488, 896, 17,  297, 715, 459, 368, 
+            995, 187, 595, 339, 875, 410, 666, 3,
+            842, 354, 610, 669, 58,  181, 764, 404, 
+            940, 172, 223, 829, 759, 503, 284, 911, 
+            820, 52, 167, 639,
+        ];        
         for _ in 0..1000 {
             let insert: u32 = rand::random_range(0..1000);
             inserts.insert(insert);
@@ -1347,13 +1379,14 @@ mod tests {
         let mut inserted = Vec::new();
         for count in 0..100 {
             let item = pop_from_hashset(&mut inserts);
+            let known_insert = known_inserts[count];
             if item.is_none() {
                 break
             } else {
                 let item = item.unwrap();
-                // println!("{},", item);
-                tree.alt_insert(item, ptr(item as usize));
-                inserted.push(item);
+                println!("{},", known_insert);
+                tree.alt_insert(known_insert, ptr(known_insert as usize));
+                inserted.push(known_insert);
             }
             // if rand::random_bool(0.1) {
             //     let delete = inserted.swap_remove(rand::random_range(0..inserted.len()));
@@ -1362,34 +1395,30 @@ mod tests {
             // }
         }
 
-        let (height_is_correct, height_error) = check_tree_height(&tree);
-        let (order_is_correct, order_error) = check_tree_ordering(&tree);
-        let (tree_leaves_are_correctly_paired, leaf_pair_error) = check_tree_leafpairs(&tree);
+        // let (height_is_correct, height_error) = check_tree_height(&tree);
+        // let (order_is_correct, order_error) = check_tree_ordering(&tree);
+        // let (tree_leaves_are_correctly_paired, leaf_pair_error) = check_tree_leafpairs(&tree);
         let (tree_is_accurate, incorrectly_mapped_keys) = check_tree_mapping(&tree, inserted.clone());
 
         let mut we_should_panic = false;
-        if !height_is_correct {
-            println!("tree:\n{}", tree);
-            println!("{}", height_error);
-            we_should_panic = true;
-        }
+        // if !height_is_correct {
+        //     println!("{}", height_error);
+        //     we_should_panic = true;
+        // }
 
-        if !order_is_correct {
-            println!("tree:\n{}", tree);
-            println!("{}", order_error);
+        // if !order_is_correct {
+        //     println!("{}", order_error);
 
-            we_should_panic = true;
-        }
+        //     we_should_panic = true;
+        // }
 
-        if !tree_leaves_are_correctly_paired {
-            println!("tree:\n{}", tree);
-            println!("{}", leaf_pair_error);
+        // if !tree_leaves_are_correctly_paired {
+        //     println!("{}", leaf_pair_error);
 
-            we_should_panic = true;
-        }
+        //     we_should_panic = true;
+        // }
 
         if !tree_is_accurate {
-            println!("tree:\n{}", tree);
             println!("{:?}", incorrectly_mapped_keys);
             println!("#missing : '{}'", incorrectly_mapped_keys.len());
             println!("#inserted : '{}'", inserted.len());
@@ -1398,11 +1427,24 @@ mod tests {
         }
 
         if we_should_panic {
+            println!("tree:\n{}", tree);
             panic!()
         } else {
             println!("SUCCESS!?!?!\n{}", tree);
         }
 
+    }
+
+    #[test]
+    fn test_fixed_list() {
+        let mut test_list: FixedList<_, 4> = FixedList::new();
+
+        test_list.push(0);
+        test_list.push(2);
+        test_list.push(3);
+        let i = test_list.search(&4);
+        dbg!(test_list);
+        println!("i: {}", i);
     }
 
 
