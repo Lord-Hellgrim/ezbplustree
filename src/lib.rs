@@ -842,16 +842,17 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
                 self.nodes.remove(right_node_pointer);
                 
-                let current_node = &mut self.nodes[parent_pointer];
-                let right_index = current_node.children.find(&right_node_pointer).unwrap();
+                let mut current_node = &mut self.nodes[parent_pointer];
+                let mut right_index = current_node.children.find(&right_node_pointer).unwrap();
                 for _ in 0..40 {
                     current_node.children.remove(right_index);
                     current_node.keys.remove(right_index-1);
                     if current_node.keys.len() > ORDER/2 {
                         break
                     } else {
-                        let parent_node = parent_stack.pop().unwrap();
-                        
+                        let current_pointer = parent_pointer;
+                        let parent_node_pointer = parent_stack.pop().unwrap();
+                        current_node = &mut self.nodes[parent_node_pointer];
                     }
                 }
             }
