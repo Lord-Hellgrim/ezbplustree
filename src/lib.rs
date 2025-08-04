@@ -773,9 +773,9 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
     pub fn alt_delete_key(&mut self, key: &K) -> Pointer {
 
-        let (mut node_pointer, mut parent_stack) = self.find_leaf(key);
+        let (node_pointer, mut parent_stack) = self.find_leaf(key);
 
-        let mut node = &mut self.nodes[node_pointer];
+        let node = &mut self.nodes[node_pointer];
         let deleted_pointer = match node.keys.find(key) {
             Some(index) => {
                 node.keys.remove(index);
@@ -785,14 +785,78 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
             None => return NULLPTR,
         };
 
-        while node.keys.len() < ORDER/2 {
-            if node_pointer == self.root_node {
-                break
-            } else if node.get_right_sibling_pointer() == NULLPTR {
-                // WHAT IF WE ARE IN THE RIGHTMOST NODE?!?!?!
-            } else {
-                let right_node_pointer = node.get_right_sibling_pointer();
+        if node.keys.len() < ORDER/2 {
+            
+            let parent_pointer = parent_stack.pop().unwrap();
+            if parent_pointer.is_null() {
+                return deleted_pointer
             }
+
+            let parent_node = &self.nodes[parent_pointer];
+            let node_index = parent_node.children.find(&node_pointer).unwrap();
+            let left_node_pointer: Pointer;
+            let right_node_pointer: Pointer;
+            if node_index == parent_node.children.len() - 1 {
+                left_node_pointer = parent_node.children[node_index-1];
+                right_node_pointer = parent_node.children[node_index];
+            } else {
+                left_node_pointer = parent_node.children[node_index];
+                right_node_pointer = parent_node.children[node_index + 1];
+            }
+
+            let left_node = &self.nodes[left_node_pointer];
+            let right_node = &self.nodes[right_node_pointer];
+
+            let mut temp_keys = Vec::new();
+            let mut temp_children = Vec::new();
+
+            for i in 0..right_node.keys.len() {
+                temp_keys.push(left_node.keys[i]);
+                temp_children.push(left_node.children[i]);
+            }
+
+            if temp_keys.len() > ORDER {
+                let current_node = &mut self.nodes[left_node_pointer];
+                for i in 0..temp_keys.len() / 2 {
+                    current_node.keys.push(temp_keys[i]);
+                    current_node.children.push(temp_children[i]);
+                }
+                let current_node = &mut self.nodes[right_node_pointer];
+                for i in temp_keys.len()/2 .. temp_keys.len() {
+                    current_node.keys.push(temp_keys[i]);
+                    current_node.children.push(temp_children[i]);
+                }
+
+                let new_right_key = current_node.keys[0];
+                let parent_node = &mut self.nodes[parent_pointer];
+                let right_index = parent_node.children.find(&right_node_pointer).unwrap();
+
+                parent_node.keys[right_index-1] = new_right_key;
+
+            } else {
+                let current_node = &mut self.nodes[left_node_pointer];
+                for i in 0..temp_keys.len() {
+                    current_node.keys.push(temp_keys[i]);
+                    current_node.children.push(temp_children[i]);
+                }
+
+                self.nodes.remove(right_node_pointer);
+                
+                let current_node = &mut self.nodes[parent_pointer];
+                let right_index = current_node.children.find(&right_node_pointer).unwrap();
+                for _ in 0..40 {
+                    current_node.children.remove(right_index);
+                    current_node.keys.remove(right_index-1);
+                    if current_node.keys.len() > ORDER/2 {
+                        break
+                    } else {
+                        let parent_node = parent_stack.pop().unwrap();
+                        
+                    }
+                }
+            }
+
+
         }
 
         return deleted_pointer
