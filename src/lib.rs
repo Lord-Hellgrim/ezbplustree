@@ -858,7 +858,30 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                         }
                         current_node = &mut self.nodes[current_parent_pointer];
                         let left_index = current_node.children.find(&parent_pointer).unwrap();
-                        left_pointer = current_node.children[left_index];
+                        if left_index == current_node.children.len() - 1 {
+                            left_pointer = current_node.children[left_index - 1];
+                            right_pointer = current_node.children[left_index];
+                        } else {
+                            left_pointer = current_node.children[left_index];
+                            right_pointer = current_node.children[left_index + 1];
+                        }
+                        let mut temp_keys = Vec::new();
+                        let mut temp_children = Vec::new();
+                        current_node = &mut self.nodes[left_pointer];
+                        for key in current_node.keys.iter() {
+                            temp_keys.push(*key);
+                        }
+                        for child in current_node.children.iter() {
+                            temp_children.push(*child);
+                        }
+
+                        current_node = &mut self.nodes[right_pointer];
+                        for key in current_node.keys.iter() {
+                            temp_keys.push(*key);
+                        }
+                        for child in current_node.children.iter() {
+                            temp_children.push(*child);
+                        }
                     }
                 }
             }
