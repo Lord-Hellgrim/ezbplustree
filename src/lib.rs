@@ -787,7 +787,7 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
         if node.keys.len() < ORDER/2 {
             
-            let parent_pointer = parent_stack.pop().unwrap();
+            let mut parent_pointer = parent_stack.pop().unwrap();
             if parent_pointer.is_null() {
                 return deleted_pointer
             }
@@ -842,14 +842,15 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
                 self.nodes.remove(right_node_pointer);
                 
-                let mut current_node = &mut self.nodes[parent_pointer];
-                let mut right_index = current_node.children.find(&right_node_pointer).unwrap();
-                current_node.children.remove(right_index);
-                current_node.keys.remove(right_index-1);
                 for _ in 0..40 {
+                    let mut current_node = &mut self.nodes[parent_pointer];
+                    let right_index = current_node.children.find(&right_node_pointer).unwrap();
+                    current_node.children.remove(right_index);
+                    current_node.keys.remove(right_index-1);
                     if current_node.keys.len() > ORDER/2 {
                         break
                     } else {
+                        // THIS WILL BREAK THE LOOP
                         let left_pointer: Pointer;
                         let right_pointer: Pointer;
                         let current_parent_pointer = parent_stack.pop().unwrap();
@@ -881,6 +882,37 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                         }
                         for child in current_node.children.iter() {
                             temp_children.push(*child);
+                        }
+
+                        if temp_keys.len() > ORDER {
+                            current_node = &mut self.nodes[left_pointer];
+                            for i in 0..temp_keys.len() / 2 {
+                                current_node.keys[i] = temp_keys[i];
+                                current_node.children[i] = temp_children[i];
+                            }
+                            current_node.children[temp_keys.len()] = temp_children[temp_keys.len()];
+                            current_node = &mut self.nodes[right_pointer];
+                            let mut n = 0;
+                            for i in temp_keys.len() / 2 .. temp_keys.len() {
+                                current_node.keys[n] = temp_keys[i];
+                                current_node.children[n] = temp_children[i+2];
+                                n += 1;
+                            }
+
+                            break
+                            
+                        } else {
+                            // THIS WILL LOOP
+                            current_node = &mut self.nodes[left_pointer];
+                            current_node.keys.clear();
+                            for key in temp_keys {
+                                current_node.keys.push(key);
+                            }
+                            current_node.children.clear();
+                            for child in temp_children {
+                                current_node.children.push(child);
+                            }
+                            parent_pointer = parent_stack.pop().unwrap();
                         }
                     }
                 }
