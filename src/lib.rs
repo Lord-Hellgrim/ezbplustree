@@ -912,12 +912,12 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                             for child in temp_children {
                                 current_node.children.push(child);
                             }
+                            
                             parent_pointer = parent_stack.pop().unwrap();
                         }
                     }
                 }
             }
-
 
         }
 
