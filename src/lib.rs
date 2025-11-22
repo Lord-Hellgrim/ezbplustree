@@ -700,6 +700,14 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
         &self.name
     }
 
+    fn load_node_const(&self, node_pointer: Pointer) -> &BPlusTreeNode<K> {
+        &self.nodes[node_pointer]
+    }
+
+    fn load_node_mut(&mut self, node_pointer: Pointer) -> &mut BPlusTreeNode<K> {
+        &mut self.nodes[node_pointer]
+    }
+
     fn find_leaf(&self, key: &K) -> (Pointer, ParentStack) {
         let mut parent_stack: ParentStack  = FixedList::new();
         parent_stack.push(NULLPTR);
@@ -771,29 +779,43 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
         }
     }
 
-    pub fn alt_delete_key(&mut self, key: &K) -> Pointer {
+    pub fn delete_key(&mut self, key: &K) -> Pointer {
 
         let (node_pointer, mut parent_stack) = self.find_leaf(key);
 
-        let node = &mut self.nodes[node_pointer];
-        let deleted_pointer = match node.keys.find(key) {
+        let node = self.load_node_mut(node_pointer);
+        let (deleted_pointer, deleted_key) = match node.keys.find(key) {
             Some(index) => {
-                node.keys.remove(index);
+                let deleted_key = node.keys.remove(index);
                 let deleted_pointer = node.children.remove(index);
-                deleted_pointer
+                (deleted_pointer, deleted_key)
             },
             None => return NULLPTR,
         };
 
-        if node.keys.len() < ORDER/2 {
+        //rebalancing tree
+        self.rebalance_tree(node_pointer, parent_stack, deleted_pointer, deleted_key);
+
+        return deleted_pointer
+
+    }
+
+    fn rebalance_tree(&mut self, current_node_pointer: Pointer, mut parent_stack: ParentStack, deleted_pointer: Pointer, deleted_key: K) {
+        
+        let node = self.load_node_mut(current_node_pointer);
+
+        if node.keys.len() > ORDER/2 {
+            return
+        } else if node.keys.len() < ORDER/2 {
             
-            let mut parent_pointer = parent_stack.pop().unwrap();
+            let parent_pointer = parent_stack.pop().unwrap();
             if parent_pointer.is_null() {
-                return deleted_pointer
+                // we must be in the root node so no (more?) balancing is needed
+                return
             }
 
             let parent_node = &self.nodes[parent_pointer];
-            let node_index = parent_node.children.find(&node_pointer).unwrap();
+            let node_index = parent_node.children.find(&current_node_pointer).unwrap();
             let left_node_pointer: Pointer;
             let right_node_pointer: Pointer;
             if node_index == parent_node.children.len() - 1 {
@@ -804,125 +826,41 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                 right_node_pointer = parent_node.children[node_index + 1];
             }
 
-            let left_node = &self.nodes[left_node_pointer];
-            let right_node = &self.nodes[right_node_pointer];
+            let left_node = self.load_node_const(left_node_pointer);
+            let right_node = self.load_node_const(right_node_pointer);
 
             let mut temp_keys = Vec::new();
             let mut temp_children = Vec::new();
 
-            for i in 0..right_node.keys.len() {
-                temp_keys.push(left_node.keys[i]);
-                temp_children.push(left_node.children[i]);
+            for key in left_node.keys.iter() {
+                temp_keys.push(*key);
+            }
+            for key in right_node.keys.iter() {
+                temp_keys.push(*key);
             }
 
-            if temp_keys.len() > ORDER {
-                let current_node = &mut self.nodes[left_node_pointer];
-                for i in 0..temp_keys.len() / 2 {
-                    current_node.keys.push(temp_keys[i]);
-                    current_node.children.push(temp_children[i]);
-                }
-                let current_node = &mut self.nodes[right_node_pointer];
-                for i in temp_keys.len()/2 .. temp_keys.len() {
-                    current_node.keys.push(temp_keys[i]);
-                    current_node.children.push(temp_children[i]);
-                }
+            for child in left_node.children.iter() {
+                temp_children.push(*child);
+            }
+            for child in right_node.children.iter() {
+                temp_children.push(*child);
+            }
 
-                let new_right_key = current_node.keys[0];
-                let parent_node = &mut self.nodes[parent_pointer];
-                let right_index = parent_node.children.find(&right_node_pointer).unwrap();
-
-                parent_node.keys[right_index-1] = new_right_key;
-
-            } else {
-                let current_node = &mut self.nodes[left_node_pointer];
+            if temp_keys.len() < ORDER {
+                let current_node = self.load_node_mut(left_node_pointer);
                 for i in 0..temp_keys.len() {
-                    current_node.keys.push(temp_keys[i]);
-                    current_node.children.push(temp_children[i]);
+                    current_node.keys[i] = temp_keys[i];
+                }
+                for i in 0..temp_children.len() {
+                    current_node.children[i] = temp_children[i];
                 }
 
                 self.nodes.remove(right_node_pointer);
                 
-                for _ in 0..40 {
-                    let mut current_node = &mut self.nodes[parent_pointer];
-                    let right_index = current_node.children.find(&right_node_pointer).unwrap();
-                    current_node.children.remove(right_index);
-                    current_node.keys.remove(right_index-1);
-                    if current_node.keys.len() > ORDER/2 {
-                        break
-                    } else {
-                        // THIS WILL BREAK THE LOOP
-                        let left_pointer: Pointer;
-                        let right_pointer: Pointer;
-                        let current_parent_pointer = parent_stack.pop().unwrap();
-                        if current_parent_pointer.is_null() {
-                            break
-                        }
-                        current_node = &mut self.nodes[current_parent_pointer];
-                        let left_index = current_node.children.find(&parent_pointer).unwrap();
-                        if left_index == current_node.children.len() - 1 {
-                            left_pointer = current_node.children[left_index - 1];
-                            right_pointer = current_node.children[left_index];
-                        } else {
-                            left_pointer = current_node.children[left_index];
-                            right_pointer = current_node.children[left_index + 1];
-                        }
-                        let mut temp_keys = Vec::new();
-                        let mut temp_children = Vec::new();
-                        current_node = &mut self.nodes[left_pointer];
-                        for key in current_node.keys.iter() {
-                            temp_keys.push(*key);
-                        }
-                        for child in current_node.children.iter() {
-                            temp_children.push(*child);
-                        }
-
-                        current_node = &mut self.nodes[right_pointer];
-                        for key in current_node.keys.iter() {
-                            temp_keys.push(*key);
-                        }
-                        for child in current_node.children.iter() {
-                            temp_children.push(*child);
-                        }
-
-                        if temp_keys.len() > ORDER {
-                            current_node = &mut self.nodes[left_pointer];
-                            for i in 0..temp_keys.len() / 2 {
-                                current_node.keys[i] = temp_keys[i];
-                                current_node.children[i] = temp_children[i];
-                            }
-                            current_node.children[temp_keys.len()] = temp_children[temp_keys.len()];
-                            current_node = &mut self.nodes[right_pointer];
-                            let mut n = 0;
-                            for i in temp_keys.len() / 2 .. temp_keys.len() {
-                                current_node.keys[n] = temp_keys[i];
-                                current_node.children[n] = temp_children[i+2];
-                                n += 1;
-                            }
-
-                            break
-                            
-                        } else {
-                            // THIS WILL LOOP
-                            current_node = &mut self.nodes[left_pointer];
-                            current_node.keys.clear();
-                            for key in temp_keys {
-                                current_node.keys.push(key);
-                            }
-                            current_node.children.clear();
-                            for child in temp_children {
-                                current_node.children.push(child);
-                            }
-                            
-                            parent_pointer = parent_stack.pop().unwrap();
-                        }
-                    }
-                }
+                self.rebalance_tree(parent_pointer, parent_stack, right_node_pointer, deleted_key);
+               
             }
-
         }
-
-        return deleted_pointer
-
     }
 
 
