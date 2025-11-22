@@ -1,4 +1,4 @@
-use std::{fmt::{Debug, Display}, ops::{Index, IndexMut}, thread::current};
+use std::{fmt::{Debug, Display}, ops::{Index, IndexMut}};
 use std::hash::Hash;
 
 use fnv::FnvHashSet;
@@ -106,7 +106,7 @@ impl<T: Null + Clone> FreeListVec<T> {
         }
     }
 
-    pub fn split_at_mut(&mut self, index: usize) -> (SplitFreeList<T>, SplitFreeList<T>) {
+    pub fn split_at_mut(&mut self, index: usize) -> (SplitFreeList<'_, T>, SplitFreeList<'_, T>) {
         let (left_slice, right_slice) = self.list.split_at_mut(index);
         let left_list = SplitFreeList {
             slice: left_slice,
@@ -721,7 +721,7 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
 
     }
 
-    fn alt_insert(&mut self, key: K, value: Pointer) {
+    pub fn insert(&mut self, key: K, value: Pointer) {
 
         let (mut node_pointer, mut parent_stack) = self.find_leaf(&key);
 
@@ -1095,7 +1095,7 @@ mod tests {
             } else {
                 let item = item.unwrap();
                 println!("{},", item);
-                tree.alt_insert(item, ptr(item as usize));
+                tree.insert(item, ptr(item as usize));
                 inserted.push(item);
             }
             // if rand::random_bool(0.1) {
