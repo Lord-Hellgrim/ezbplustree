@@ -47,7 +47,7 @@ impl Null for usize {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Pointer {
-    pub pointer: usize,
+    pointer: usize,
 }
 
 impl Null for Pointer {
@@ -71,7 +71,15 @@ pub fn ptr(u: usize) -> Pointer {
     Pointer{pointer: u}
 }
 
+pub fn pop_from_hashset<T: Eq + Hash + Clone>(set: &mut FnvHashSet<T>) -> Option<T> {
+    let result = match set.iter().next() {
+        Some(item) => item,
+        None => return None,
+    };
+    let key = result.clone();
 
+    set.take(&key)
+}
 
 #[derive(Clone, Debug)]
 pub struct FreeListVec<T: Null> {
@@ -106,47 +114,8 @@ impl<T: Null + Clone> FreeListVec<T> {
         }
     }
 
-    pub fn split_at_mut(&mut self, index: usize) -> (SplitFreeList<'_, T>, SplitFreeList<'_, T>) {
-        let (left_slice, right_slice) = self.list.split_at_mut(index);
-        let left_list = SplitFreeList {
-            slice: left_slice,
-            free_list: &self.free_list,
-        };
-
-        let right_list = SplitFreeList {
-            slice: right_slice,
-            free_list: &self.free_list,
-        };
-
-        (left_list, right_list)
-    }
 }
 
-pub struct SplitFreeList<'a, T> {
-    pub slice: &'a mut [T],
-    free_list: &'a FnvHashSet<usize>,
-}
-
-impl<'a, T: Null + Clone> Index<Pointer> for SplitFreeList<'a, T> {
-    type Output = T;
-
-    fn index(&self, index: Pointer) -> &Self::Output {
-        if self.free_list.contains(&index.pointer) {
-            panic!("Tried to access a freed value with index: {}", index.pointer)
-        }
-        &self.slice[index.pointer]
-    }
-}
-
-impl<'a, T: Null + Clone> IndexMut<Pointer> for SplitFreeList<'a, T> {
-
-    fn index_mut(&mut self, index: Pointer) -> &mut Self::Output {
-        if self.free_list.contains(&index.pointer) {
-            panic!("Tried to access a freed value with index: {}", index.pointer)
-        }
-        &mut self.slice[index.pointer]
-    }
-}
 
 impl<T: Null + Clone> Index<Pointer> for FreeListVec<T> {
     type Output = T;
@@ -206,136 +175,6 @@ impl<'a, T: Null> Iterator for FreeListIter<'a, T> {
 pub fn extend_zeroes(vec: &mut Vec<u8>, n: usize) {
     vec.resize(vec.len() + n, 0);
 }
-
-
-pub struct Hallocator {
-    pub buffer: Vec<u8>,
-    block_size: usize,
-    tail: usize,
-    free_list: FnvHashSet<usize>,
-}
-
-impl Hallocator {
-    pub fn new(block_size: usize) -> Hallocator {
-        Hallocator {
-            buffer: Vec::with_capacity(block_size * 64),
-            block_size,
-            tail: 0,
-            free_list: FnvHashSet::default(),
-        }
-    }
-
-    pub fn alloc(&mut self) -> Pointer {
-        
-        match pop_from_hashset(&mut self.free_list) {
-            Some(pointer) => {
-                Pointer{pointer}
-            },
-            None => {
-                let result = self.tail;
-                extend_zeroes(&mut self.buffer, self.block_size);
-                self.tail += self.block_size;
-                Pointer{pointer: result}
-            },
-        }
-    }
-
-    pub fn free(&mut self, pointer: usize) -> Result<(), String> {
-        match self.free_list.insert(pointer) {
-            true => (),
-            false => return Err(format!("Attempting to double free a pointer. Pointer address: {}", pointer as usize)),
-        }
-        let row_pointer = &self.buffer[pointer..pointer + self.block_size].as_mut_ptr();
-        unsafe { row_pointer.write_bytes(0, self.block_size) };
-
-        Ok(())
-    }
-
-    pub fn block_size(&self) -> usize {
-        self.block_size
-    }
-
-    #[inline]
-    pub fn get_block(&self, pointer: Pointer) -> &[u8] {
-        let pointer = pointer.pointer;
-        &self.buffer[pointer..pointer+self.block_size]
-    }
-
-    #[inline]
-    pub fn get_block_mut(&mut self, pointer: Pointer) -> &mut [u8] {
-        let pointer = pointer.pointer;
-
-        &mut self.buffer[pointer..pointer+self.block_size]
-    }
-
-    #[inline]
-    pub fn read_i32(&self, pointer: Pointer, offset: usize) -> i32 {
-        let pointer = pointer.pointer;
-
-        if offset > self.block_size - 4 {
-            panic!("Trying to read out of bounds memory")
-        }
-        unsafe { *(self.get_block(ptr(pointer+offset)).as_ptr() as *const i32) }
-    }
-
-    #[inline]
-    pub fn read_u64(&self, pointer: Pointer, offset: usize) -> u64 {
-        let pointer = pointer.pointer;
-        
-        if offset > self.block_size - 8 {
-            panic!("Trying to read out of bounds memory")
-        }
-        unsafe { *(self.get_block(ptr(pointer+offset)).as_ptr() as *const u64) }
-    }
-
-    #[inline]
-    pub fn read_f32(&self, pointer: Pointer, offset: usize) -> f32 {
-        let pointer = pointer.pointer;
-        
-        if offset > self.block_size - 4 {
-            panic!("Trying to read out of bounds memory")
-        }
-        unsafe { *(self.get_block(ptr(pointer+offset)).as_ptr() as *const f32) }
-    }
-
-    #[inline]
-    pub fn write_i32(&mut self, pointer: Pointer, offset: usize, value: i32) {
-        let pointer = pointer.pointer;
-        
-        if offset > self.block_size - 4 {
-            panic!("Trying to write out of bounds memory")
-        }
-        unsafe { (self.get_block_mut(ptr(pointer+offset)).as_mut_ptr() as *mut i32).write(value) }
-    }
-
-    #[inline]
-    pub fn write_u64(&mut self, pointer: Pointer, offset: usize, value: u64) {
-        let pointer = pointer.pointer;
-        
-        if offset > self.block_size - 8 {
-            panic!("Trying to write out of bounds memory")
-        }
-        unsafe { (self.get_block_mut(ptr(pointer+offset)).as_mut_ptr() as *mut u64).write(value) }
-    }
-
-    #[inline]
-    pub fn write_f32(&mut self, pointer: Pointer, offset: usize, value: f32) {
-        let pointer = pointer.pointer;
-        
-        if offset > self.block_size - 4 {
-            panic!("Trying to write out of bounds memory")
-        }
-        unsafe { (self.get_block_mut(ptr(pointer+offset)).as_mut_ptr() as *mut f32).write(value) }
-    }
-
-    
-}
-
-
-
-
-
-
 
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -502,7 +341,7 @@ impl<T: Null + Clone + Copy + Debug + Ord + Eq + Sized, const N: usize> FixedLis
     }
 }
 
-impl<T: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized, const N: usize> Display for FixedList<T, N> {
+impl<T: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized, const N: usize>    Display    for FixedList<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut printer = String::from("[");
         for item in &self.list[0..self.len()] {
@@ -526,18 +365,6 @@ impl<T: Null + Clone + Copy + Debug + Display + Ord + Eq + Sized, const N: usize
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.list[index]
     }
-}
-
-
-
-pub fn pop_from_hashset<T: Eq + Hash + Clone>(set: &mut FnvHashSet<T>) -> Option<T> {
-    let result = match set.iter().next() {
-        Some(item) => item,
-        None => return None,
-    };
-    let key = result.clone();
-
-    set.take(&key)
 }
 
 
@@ -595,14 +422,6 @@ impl <K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display + Display> BPl
 
     fn set_right_sibling_pointer(&mut self, pointer: Pointer) {
         self.right_sibling = pointer;
-    }
-
-    fn get_left_sibling_pointer(&self) -> Pointer {
-        self.left_sibling
-    }
-
-    fn set_left_sibling_pointer(&mut self, pointer: Pointer) {
-        self.left_sibling = pointer;
     }
 
     fn split(&self, key: K, value: Pointer) -> (BPlusTreeNode<K>, BPlusTreeNode<K>, K) {
@@ -814,7 +633,7 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
                 return
             }
 
-            let parent_node = &self.nodes[parent_pointer];
+            let parent_node = &self.load_node_const(parent_pointer);
             let node_index = parent_node.children.find(&current_node_pointer).unwrap();
             let left_node_pointer: Pointer;
             let right_node_pointer: Pointer;
@@ -847,17 +666,26 @@ impl<K: Null + Clone + Copy + Debug + Ord + Eq + Sized + Display> BPlusTreeMap<K
             }
 
             if temp_keys.len() < ORDER {
-                let current_node = self.load_node_mut(left_node_pointer);
-                for i in 0..temp_keys.len() {
-                    current_node.keys[i] = temp_keys[i];
-                }
-                for i in 0..temp_children.len() {
-                    current_node.children[i] = temp_children[i];
-                }
 
-                self.nodes.remove(right_node_pointer);
+                let current_node = self.load_node_mut(left_node_pointer);
+
+                if current_node.is_leaf {
+                    
+                    for i in 0..temp_keys.len() {
+                        current_node.keys[i] = temp_keys[i];
+                    }
+                    for i in 0..temp_children.len() {
+                        current_node.children[i] = temp_children[i];
+                    }
+
+                    self.nodes.remove(right_node_pointer);
+                    
+                    self.rebalance_tree(parent_pointer, parent_stack, right_node_pointer, deleted_key);
+
+                } else {
+                    
+                }
                 
-                self.rebalance_tree(parent_pointer, parent_stack, right_node_pointer, deleted_key);
                
             }
         }
